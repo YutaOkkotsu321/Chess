@@ -10,6 +10,10 @@ import {
   getProfile,
   getRecentGames,
 } from "@/lib/games/queries";
+import {
+  FREE_DAILY_REVIEW_LIMIT,
+  getReviewsUsedToday,
+} from "@/lib/reviews/usage";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
@@ -30,11 +34,17 @@ export default async function ProfilePage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/auth/sign-in?next=/profile");
 
-  const [profile, stats, recent] = await Promise.all([
+  const [profile, stats, recent, reviewsUsedToday] = await Promise.all([
     getProfile(user.id),
     getGameStats(user.id),
     getRecentGames(user.id, 10),
+    getReviewsUsedToday(user.id),
   ]);
+
+  const isPro = profile?.is_pro ?? false;
+  const reviewsRemaining = isPro
+    ? null
+    : Math.max(0, FREE_DAILY_REVIEW_LIMIT - reviewsUsedToday);
 
   const displayName =
     profile?.display_name || user.email?.split("@")[0] || "Player";
@@ -101,13 +111,20 @@ export default async function ProfilePage() {
       )}
 
       <section className="rounded-2xl border border-border bg-card">
-        <header className="flex items-center justify-between border-b border-border px-5 py-3">
+        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-5 py-3">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Recent games
           </h2>
-          <span className="text-xs text-muted-foreground">
-            {recent.length} of {stats.total}
-          </span>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <ReviewQuotaBadge
+              isPro={isPro}
+              used={reviewsUsedToday}
+              remaining={reviewsRemaining}
+            />
+            <span>
+              {recent.length} of {stats.total}
+            </span>
+          </div>
         </header>
         {recent.length === 0 ? (
           <div className="flex flex-col items-center gap-3 px-5 py-12 text-center">
@@ -153,6 +170,41 @@ export default async function ProfilePage() {
         )}
       </section>
     </div>
+  );
+}
+
+function ReviewQuotaBadge({
+  isPro,
+  used,
+  remaining,
+}: {
+  isPro: boolean;
+  used: number;
+  remaining: number | null;
+}) {
+  if (isPro) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-amber-600 ring-1 ring-amber-500/30 dark:text-amber-300">
+        Reviews · ∞
+      </span>
+    );
+  }
+  const exhausted = remaining === 0;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ring-1 ${
+        exhausted
+          ? "bg-destructive/10 text-destructive ring-destructive/20"
+          : "bg-muted text-muted-foreground ring-border"
+      }`}
+      title={
+        exhausted
+          ? "Free quota used up. Resets at 00:00 UTC, or upgrade to Pro."
+          : `${used} of ${used + (remaining ?? 0)} reviews used today`
+      }
+    >
+      Reviews · {used}/{used + (remaining ?? 0)} today
+    </span>
   );
 }
 
