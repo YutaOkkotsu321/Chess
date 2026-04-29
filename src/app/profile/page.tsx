@@ -123,7 +123,7 @@ export default async function ProfilePage() {
             {recent.map((g) => (
               <li
                 key={g.id}
-                className="grid grid-cols-[auto_1fr_auto] items-center gap-4 px-5 py-3"
+                className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-5 py-3 sm:gap-4"
               >
                 <ResultBadge result={g.result} />
                 <div className="min-w-0">
@@ -144,6 +144,9 @@ export default async function ProfilePage() {
                 >
                   {formatRelative(g.played_at)}
                 </time>
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`/profile/games/${g.id}`}>Review</Link>
+                </Button>
               </li>
             ))}
           </ul>

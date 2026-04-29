@@ -23,7 +23,28 @@ export type FindBestMoveOptions = {
   movetime: number;
 };
 
+export type AnalyzeOptions = {
+  fen: string;
+  /** Engine think time in ms. */
+  movetime: number;
+};
+
+/**
+ * Result of an analysis at a given position.
+ * `scoreCp` is centipawns from the side-to-move's perspective.
+ * If the engine reported a mate score, `mate` holds the signed mate-in-N value
+ * (positive = side-to-move mates; negative = side-to-move gets mated) and
+ * `scoreCp` is normalized to ±100_000 for comparisons.
+ */
+export type AnalysisResult = {
+  scoreCp: number;
+  mate: number | null;
+  bestMove: BestMove | null;
+};
+
 type LineListener = (line: string) => void;
+
+const MATE_SCORE_CP = 100_000;
 
 export class StockfishEngine {
   private worker: Worker | null = null;
@@ -121,6 +142,75 @@ export class StockfishEngine {
           from: move.slice(0, 2),
           to: move.slice(2, 4),
           promotion: move.length > 4 ? move[4] : undefined,
+        });
+      };
+
+      this.rawListeners.add(handler);
+    });
+  }
+
+  /**
+   * Evaluates the given position at full strength and returns the engine's
+   * latest score plus its preferred move. Used for post-game analysis where
+   * we want an honest verdict, not a difficulty-tuned reply.
+   */
+  async analyze(opts: AnalyzeOptions): Promise<AnalysisResult> {
+    if (!this.ready || !this.worker) {
+      throw new Error("Engine is not ready");
+    }
+
+    if (this.currentSkill !== 20) {
+      this.send("setoption name Skill Level value 20");
+      this.currentSkill = 20;
+    }
+
+    this.send(`position fen ${opts.fen}`);
+    this.send(`go movetime ${Math.max(50, Math.round(opts.movetime))}`);
+
+    return new Promise<AnalysisResult>((resolve, reject) => {
+      const timeoutMs = opts.movetime + 10_000;
+      let lastScoreCp: number | null = null;
+      let lastMate: number | null = null;
+
+      const timer = setTimeout(() => {
+        this.rawListeners.delete(handler);
+        reject(new Error("stockfish: analyze timed out"));
+      }, timeoutMs);
+
+      const handler: LineListener = (line) => {
+        if (line.startsWith("info")) {
+          const mateMatch = line.match(/\bscore mate (-?\d+)\b/);
+          if (mateMatch) {
+            lastMate = Number(mateMatch[1]);
+            lastScoreCp = lastMate >= 0 ? MATE_SCORE_CP : -MATE_SCORE_CP;
+            return;
+          }
+          const cpMatch = line.match(/\bscore cp (-?\d+)\b/);
+          if (cpMatch) {
+            lastScoreCp = Number(cpMatch[1]);
+            lastMate = null;
+          }
+          return;
+        }
+        if (!line.startsWith("bestmove")) return;
+        clearTimeout(timer);
+        this.rawListeners.delete(handler);
+
+        const tokens = line.split(/\s+/);
+        const moveStr = tokens[1];
+        let bestMove: BestMove | null = null;
+        if (moveStr && moveStr !== "(none)" && moveStr !== "0000") {
+          bestMove = {
+            from: moveStr.slice(0, 2),
+            to: moveStr.slice(2, 4),
+            promotion: moveStr.length > 4 ? moveStr[4] : undefined,
+          };
+        }
+
+        resolve({
+          scoreCp: lastScoreCp ?? 0,
+          mate: lastMate,
+          bestMove,
         });
       };
 

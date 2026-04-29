@@ -33,6 +33,20 @@ export async function getRecentGames(
   return (data as Game[] | null) ?? [];
 }
 
+export async function getGameById(
+  id: string,
+  userId: string
+): Promise<Game | null> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("games")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  return data as Game | null;
+}
+
 export async function getGameStats(userId: string): Promise<GameStats> {
   const supabase = await createClient();
   const { data } = await supabase
